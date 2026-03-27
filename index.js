@@ -21,4 +21,4 @@ async def hello(ctx):
     await ctx.send("هلا والله 👋")
 
 # شغل البوت
-bot.run("")
+client.login(process.env.TOKEN);
