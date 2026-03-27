@@ -1,26 +1,24 @@
-const { Client, GatewayIntentBits } = require('discord.js');
+import discord
+from discord.ext import commands
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
-});
+intents = discord.Intents.default()
+intents.message_content = True
 
-// لما يشتغل البوت
-client.once('ready', () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-});
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-// أوامر بسيطة
-client.on('messageCreate', message => {
-  if (message.author.bot) return;
+@bot.event
+async def on_ready():
+    print(f"✅ Logged in as {bot.user}")
 
-  if (message.content === 'ping') {
-    message.reply('🏓 pong!');
-  }
+# أمر ping
+@bot.command()
+async def ping(ctx):
+    await ctx.send("🏓 pong!")
 
-  if (message.content === 'مرحبا') {
-    message.reply('هلا والله 👋');
-  }
-});
+# أمر ترحيب
+@bot.command()
+async def hello(ctx):
+    await ctx.send("هلا والله 👋")
 
-// حط التوكن هنا 👇
-client.login('YOUR_BOT_TOKEN');
+# شغل البوت
+bot.run("")
