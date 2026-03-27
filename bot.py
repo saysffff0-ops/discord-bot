@@ -1,3 +1,10 @@
+import discord
+from discord.ext import commands
+from discord.ui import View, Button, Select
+import os, random, asyncio
+from collections import defaultdict
+
+# ───── keep alive ─────
 from flask import Flask
 from threading import Thread
 
@@ -12,12 +19,9 @@ def run():
 
 def keep_alive():
     t = Thread(target=run)
-    t.start()import discord
-from discord.ext import commands
-from discord.ui import View, Button, Select
-import os, random, asyncio
-from collections import defaultdict
+    t.start()
 
+# ───── البوت ─────
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=None, intents=intents)
 tree = bot.tree
@@ -35,15 +39,19 @@ SHOP = {"VIP":500, "مميز":300}
 # ───── تشغيل ─────
 @bot.event
 async def on_ready():
-    await tree.sync()
+    try:
+        synced = await tree.sync()
+        print(f"✅ تم تسجيل {len(synced)} أمر")
+    except Exception as e:
+        print(e)
+
     print(f"🔥 {bot.user} شغال")
 
-# ───── أوامر عامة ─────
+# ───── أوامر ─────
 @tree.command(name="ping", description="سرعة البوت")
 async def ping(i: discord.Interaction):
     await i.response.send_message(f"🏓 {round(bot.latency*1000)}ms")
 
-# ───── إدارة ─────
 @tree.command(name="حذف", description="حذف رسائل")
 async def delete(i: discord.Interaction, عدد:int):
     await i.channel.purge(limit=عدد)
@@ -54,7 +62,6 @@ async def ban(i: discord.Interaction, عضو:discord.Member):
     await عضو.ban()
     await i.response.send_message("🔨 تم الباند")
 
-# ───── اقتصاد ─────
 @tree.command(name="فلوسي", description="رصيدك")
 async def money(i: discord.Interaction):
     await i.response.send_message(f"💰 {economy[i.user.id]}")
@@ -72,7 +79,6 @@ async def give(i: discord.Interaction, عضو:discord.Member, مبلغ:int):
     economy[عضو.id]+=مبلغ
     await i.response.send_message("✅ تم التحويل")
 
-# ───── متجر ─────
 @tree.command(name="المتجر", description="عرض المتجر")
 async def shop(i: discord.Interaction):
     msg="\n".join([f"{k} = {v}💰" for k,v in SHOP.items()])
@@ -87,12 +93,10 @@ async def buy(i: discord.Interaction, item:str):
     economy[i.user.id]-=SHOP[item]
     await i.response.send_message(f"✅ اشتريت {item}")
 
-# ───── ألعاب ─────
 @tree.command(name="رقم", description="رقم عشوائي")
 async def num(i: discord.Interaction):
     await i.response.send_message(f"🎲 {random.randint(1,100)}")
 
-# ───── لفلات ─────
 @tree.command(name="لفلي", description="عرض لفلك")
 async def lvl(i: discord.Interaction):
     await i.response.send_message(f"🎖️ {levels[i.user.id]}")
@@ -126,7 +130,6 @@ class TicketSelect(Select):
 async def ticket(i: discord.Interaction):
     await i.response.send_message("🎫 اختر:", view=TicketView())
 
-# ───── ذكاء بسيط ─────
 @tree.command(name="ذكاء", description="رد عشوائي")
 async def ai(i: discord.Interaction, سؤال:str):
     await i.response.send_message(random.choice(["ايه","لا","مدري","ممكن"]))
@@ -152,5 +155,8 @@ async def on_message(msg):
         levels[user.id]+=1
         await msg.channel.send(f"🎉 {user.mention} لفل {levels[user.id]}")
 
-# تشغيل
-keep_alive()bot.run(os.getenv("TOKEN"))
+# ───── تشغيل دائم ─────
+keep_alive()
+
+# ───── تشغيل البوت ─────
+bot.run(os.getenv("TOKEN"))
