@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select
-import os, asyncio, datetime
+import os, datetime
 from flask import Flask
 from threading import Thread
 from collections import defaultdict
@@ -21,21 +21,27 @@ bot = commands.Bot(command_prefix=None, intents=intents)
 tree = bot.tree
 
 # ───── إعدادات ─────
-CHAT_CHANNEL_ID = 123456789  # 🔥 حط ايدي الشات العام
-
-TICKET_TYPES = ["دعم 🛠️","شراء 💰","مشاكل 🎮","اقتراح 💡"]
+CHAT_CHANNEL_ID = 123456789  # 👈 حط ايدي الشات العام
+SUPPORT_ROLE = "Support"     # 👈 اسم رتبة الدعم
 
 points = defaultdict(int)
 claims = defaultdict(int)
 messages = defaultdict(int)
 
+TICKET_TYPES = ["دعم 🛠️","شراء 💰","مشاكل 🎮","اقتراح 💡"]
+
 # ───── تشغيل ─────
 @bot.event
 async def on_ready():
-    await tree.sync()
-    print("🔥 شغال")
+    try:
+        synced = await tree.sync()
+        print(f"✅ تم تسجيل {len(synced)} أمر")
+    except Exception as e:
+        print(e)
 
-# ───── التذاكر ─────
+    print("🔥 البوت شغال")
+
+# ───── أزرار التذكرة ─────
 class TicketButtons(View):
     def __init__(self, owner_id):
         super().__init__(timeout=None)
@@ -44,6 +50,9 @@ class TicketButtons(View):
 
     @discord.ui.button(label="🙋‍♂️ استلام", style=discord.ButtonStyle.green)
     async def claim(self, i: discord.Interaction, b: Button):
+
+        if not any(role.name == SUPPORT_ROLE for role in i.user.roles):
+            return await i.response.send_message("❌ هذا الزر للإدارة فقط", ephemeral=True)
 
         if i.user.id == self.owner_id:
             return await i.response.send_message("❌ ما تقدر تستلم تذكرتك", ephemeral=True)
@@ -57,7 +66,6 @@ class TicketButtons(View):
         self.claimed_by = i.user
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        # نقاط التذاكر
         claims[i.user.id] += 1
         if claims[i.user.id] % 2 == 0:
             points[i.user.id] += 1
@@ -65,12 +73,12 @@ class TicketButtons(View):
         embed = discord.Embed(
             title="📌 Ticket Claimed",
             description=(
-                f"👤 **الإداري المسؤول:** {i.user.mention}\n"
-                f"⏰ **وقت الاستلام:** `{now}`\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "📋 تم استلام هذه التذكرة من قبل أحد أعضاء فريق الإدارة المختصين\n"
-                "💬 سيتم التعامل مع طلبك في أقرب وقت ممكن\n\n"
-                "⚠️ يرجى الالتزام بالقوانين واحترام الإدارة"
+                f"👤 الإداري المسؤول: {i.user.mention}\n"
+                f"⏰ الوقت: `{now}`\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "📋 تم استلام التذكرة من قبل الإدارة\n"
+                "💬 سيتم الرد قريبًا\n"
+                "⚠️ يرجى احترام الإدارة"
             ),
             color=discord.Color.green()
         )
@@ -118,9 +126,16 @@ class TicketView(View):
         super().__init__()
         self.add_item(TicketSelect())
 
+# ───── سلاش ─────
 @tree.command(name="تذاكر")
 async def ticket(i: discord.Interaction):
-    await i.response.send_message("🎫 اختر نوع التذكرة:", view=TicketView())
+    await i.response.defer()
+    await i.followup.send("🎫 اختر نوع التذكرة:", view=TicketView())
+
+@tree.command(name="ping")
+async def ping(i: discord.Interaction):
+    await i.response.defer()
+    await i.followup.send(f"🏓 {round(bot.latency*1000)}ms")
 
 # ───── التفاعل + أفضل إداري ─────
 @bot.event
@@ -128,24 +143,19 @@ async def on_message(msg):
     if msg.author.bot:
         return
 
-    # التفاعل فقط بالشات العام
     if msg.channel.id == CHAT_CHANNEL_ID:
         messages[msg.author.id] += 1
 
         if messages[msg.author.id] % 100 == 0:
             points[msg.author.id] += 3
-            await msg.channel.send(
-                f"🏆 {msg.author.mention} حصل على 3 نقاط للتفاعل!"
-            )
+            await msg.channel.send(f"🏆 {msg.author.mention} حصل على 3 نقاط!")
 
-    # أفضل إداري
     if msg.content.strip() == "افضل اداري":
 
         sorted_users = sorted(points.items(), key=lambda x: x[1], reverse=True)
 
         embed = discord.Embed(
-            title="🏆 لوحة أفضل الإداريين",
-            description="📊 الترتيب يعتمد على النقاط والتفاعل",
+            title="🏆 أفضل الإداريين",
             color=discord.Color.gold()
         )
 
@@ -154,25 +164,13 @@ async def on_message(msg):
         for i, (user_id, pts) in enumerate(sorted_users[:5]):
             try:
                 user = await bot.fetch_user(user_id)
-
                 embed.add_field(
                     name=f"{medals[i]} {user.name}",
-                    value=f"💎 النقاط: {pts}\n💬 التفاعل: {messages[user_id]} رسالة",
+                    value=f"💎 {pts} نقطة\n💬 {messages[user_id]} رسالة",
                     inline=False
                 )
             except:
                 continue
-
-        if sorted_users:
-            top_user = await bot.fetch_user(sorted_users[0][0])
-            embed.add_field(
-                name="👑 أفضل إداري حاليا",
-                value=f"{top_user.mention}",
-                inline=False
-            )
-            embed.set_thumbnail(url=top_user.display_avatar.url)
-
-        embed.set_footer(text="🔥 استمر بالمنافسة للوصول للقمة!")
 
         await msg.channel.send(embed=embed)
 
@@ -180,5 +178,5 @@ async def on_message(msg):
 
 # ───── تشغيل ─────
 keep_alive()
-bot.run(os.getenv("TOKEN"))
-       
+bot.run(os.getenv("DISCORD_BOT_TOKEN"))CHAT_CHANNEL_ID = 123456789
+SUPPORT_ROLE = "TC 『Management』"
