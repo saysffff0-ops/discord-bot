@@ -4,18 +4,20 @@ on:
   workflow_dispatch:
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: تحميل الملفات
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
+      - name: تثبيت بايثون
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
-      - run: pip install -r requirements.txt
+      - name: تثبيت المكتبات
+        run: pip install -r requirements.txt
 
-      - run: python bot.py
-        env:
-          TOKEN: ${{ secrets.TOKEN }}
+      - name: تشغيل البوت
+        run: python bot.py
