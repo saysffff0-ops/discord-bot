@@ -8,18 +8,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: تحميل الملفات
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: تثبيت بايثون
         uses: actions/setup-python@v4
         with:
           python-version: 3.11
 
-      - name: Install requirements
+      - name: تثبيت المكتبات
         run: pip install -r requirements.txt
 
-      - name: Run bot
+      - name: تشغيل البوت
         run: python bot.py
         env:
           TOKEN: ${{ secrets.TOKEN }}
