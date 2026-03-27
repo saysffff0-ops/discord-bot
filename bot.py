@@ -9,82 +9,66 @@ from flask import Flask
 from threading import Thread
 
 app = Flask('')
-
 @app.route('/')
 def home():
-    return "Bot is alive!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
+    return "Alive"
 
 def keep_alive():
-    t = Thread(target=run)
-    t.start()
+    Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
 
-# ───── البوت ─────
+# ───── bot ─────
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=None, intents=intents)
 tree = bot.tree
 
-# ───── بيانات ─────
 economy = defaultdict(int)
 xp = defaultdict(int)
-levels = defaultdict(lambda: 1)
+levels = defaultdict(lambda:1)
 warnings = defaultdict(int)
 spam = defaultdict(list)
 
-TICKET_TYPES = ["دعم 🛠️","شراء 💰","مشاكل 🎮","اقتراح 💡"]
 SHOP = {"VIP":500, "مميز":300}
+TICKET_TYPES = ["دعم 🛠️","شراء 💰","مشاكل 🎮","اقتراح 💡"]
 
-# ───── تشغيل ─────
+# ───── ready ─────
 @bot.event
 async def on_ready():
-    try:
-        synced = await tree.sync()
-        print(f"✅ تم تسجيل {len(synced)} أمر")
-    except Exception as e:
-        print(e)
-
-    print(f"🔥 {bot.user} شغال")
+    await tree.sync()
+    print("🔥 جاهز")
 
 # ───── أوامر ─────
-@tree.command(name="ping", description="سرعة البوت")
+@tree.command(name="ping")
 async def ping(i: discord.Interaction):
     await i.response.send_message(f"🏓 {round(bot.latency*1000)}ms")
 
-@tree.command(name="حذف", description="حذف رسائل")
+@tree.command(name="حذف")
 async def delete(i: discord.Interaction, عدد:int):
+    await i.response.defer(ephemeral=True)
     await i.channel.purge(limit=عدد)
-    await i.response.send_message(f"🧹 تم حذف {عدد}", ephemeral=True)
+    await i.followup.send(f"🧹 تم حذف {عدد}", ephemeral=True)
 
-@tree.command(name="باند", description="حظر عضو")
-async def ban(i: discord.Interaction, عضو:discord.Member):
-    await عضو.ban()
-    await i.response.send_message("🔨 تم الباند")
-
-@tree.command(name="فلوسي", description="رصيدك")
+@tree.command(name="فلوسي")
 async def money(i: discord.Interaction):
     await i.response.send_message(f"💰 {economy[i.user.id]}")
 
-@tree.command(name="يومي", description="مكافأة يومية")
+@tree.command(name="يومي")
 async def daily(i: discord.Interaction):
     economy[i.user.id]+=200
     await i.response.send_message("💸 +200")
 
-@tree.command(name="تحويل", description="تحويل فلوس")
+@tree.command(name="تحويل")
 async def give(i: discord.Interaction, عضو:discord.Member, مبلغ:int):
     if economy[i.user.id] < مبلغ:
         return await i.response.send_message("❌ فلوسك قليلة")
     economy[i.user.id]-=مبلغ
     economy[عضو.id]+=مبلغ
-    await i.response.send_message("✅ تم التحويل")
+    await i.response.send_message("✅ تم")
 
-@tree.command(name="المتجر", description="عرض المتجر")
+@tree.command(name="المتجر")
 async def shop(i: discord.Interaction):
-    msg="\n".join([f"{k} = {v}💰" for k,v in SHOP.items()])
-    await i.response.send_message(msg)
+    await i.response.send_message("\n".join([f"{k} = {v}" for k,v in SHOP.items()]))
 
-@tree.command(name="شراء", description="شراء عنصر")
+@tree.command(name="شراء")
 async def buy(i: discord.Interaction, item:str):
     if item not in SHOP:
         return await i.response.send_message("❌ غير موجود")
@@ -93,44 +77,47 @@ async def buy(i: discord.Interaction, item:str):
     economy[i.user.id]-=SHOP[item]
     await i.response.send_message(f"✅ اشتريت {item}")
 
-@tree.command(name="رقم", description="رقم عشوائي")
+@tree.command(name="رقم")
 async def num(i: discord.Interaction):
     await i.response.send_message(f"🎲 {random.randint(1,100)}")
 
-@tree.command(name="لفلي", description="عرض لفلك")
+@tree.command(name="لفلي")
 async def lvl(i: discord.Interaction):
     await i.response.send_message(f"🎖️ {levels[i.user.id]}")
 
 # ───── تذاكر ─────
-class TicketView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(TicketSelect())
+class Close(View):
+    @discord.ui.button(label="إغلاق 🔒", style=discord.ButtonStyle.red)
+    async def close(self, i: discord.Interaction, b: Button):
+        await i.response.defer()
+        await i.channel.delete()
 
-class TicketSelect(Select):
+class Ticket(View):
+    def __init__(self):
+        super().__init__()
+        self.add_item(SelectMenu())
+
+class SelectMenu(Select):
     def __init__(self):
         options=[discord.SelectOption(label=x) for x in TICKET_TYPES]
-        super().__init__(placeholder="اختر نوع التذكرة", options=options)
+        super().__init__(placeholder="اختر", options=options)
 
     async def callback(self, i: discord.Interaction):
+        await i.response.defer(ephemeral=True)
         name=f"ticket-{i.user.name}"
+
         if discord.utils.get(i.guild.channels,name=name):
-            return await i.response.send_message("❌ عندك تذكرة",ephemeral=True)
+            return await i.followup.send("❌ عندك تذكرة",ephemeral=True)
 
-        overwrites={
-            i.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            i.user: discord.PermissionOverwrite(view_channel=True)
-        }
+        ch=await i.guild.create_text_channel(name)
+        await ch.send(f"🎫 {i.user.mention}", view=Close())
+        await i.followup.send(f"✅ {ch.mention}",ephemeral=True)
 
-        ch=await i.guild.create_text_channel(name, overwrites=overwrites)
-        await ch.send(f"🎫 {i.user.mention}")
-        await i.response.send_message(f"✅ {ch.mention}",ephemeral=True)
-
-@tree.command(name="تذاكر", description="فتح تذكرة")
+@tree.command(name="تذاكر")
 async def ticket(i: discord.Interaction):
-    await i.response.send_message("🎫 اختر:", view=TicketView())
+    await i.response.send_message("🎫 اختر:", view=Ticket())
 
-@tree.command(name="ذكاء", description="رد عشوائي")
+@tree.command(name="ذكاء")
 async def ai(i: discord.Interaction, سؤال:str):
     await i.response.send_message(random.choice(["ايه","لا","مدري","ممكن"]))
 
@@ -147,7 +134,6 @@ async def on_message(msg):
 
     if len(spam[user.id])>5:
         await msg.delete()
-        warnings[user.id]+=1
 
     xp[user.id]+=5
     if xp[user.id]>=levels[user.id]*100:
@@ -155,8 +141,7 @@ async def on_message(msg):
         levels[user.id]+=1
         await msg.channel.send(f"🎉 {user.mention} لفل {levels[user.id]}")
 
-# ───── تشغيل دائم ─────
+# ───── تشغيل ─────
 keep_alive()
-
-# ───── تشغيل البوت ─────
 bot.run(os.getenv("TOKEN"))
+       
