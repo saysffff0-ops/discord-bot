@@ -180,5 +180,5 @@ async def on_message(msg):
 
 # ───── تشغيل ─────
 keep_alive()
-bot.run(os.getenv("DISCORD_BOT_TOKEN"))
+bot.run(os.getenv("TOKEN"))
        
