@@ -1,13 +1,12 @@
 import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select
-import os, random, asyncio
+import os, asyncio, datetime
+from flask import Flask
+from threading import Thread
 from collections import defaultdict
 
 # ───── keep alive ─────
-from flask import Flask
-from threading import Thread
-
 app = Flask('')
 @app.route('/')
 def home():
@@ -21,127 +20,165 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=None, intents=intents)
 tree = bot.tree
 
-economy = defaultdict(int)
-xp = defaultdict(int)
-levels = defaultdict(lambda:1)
-warnings = defaultdict(int)
-spam = defaultdict(list)
+# ───── إعدادات ─────
+CHAT_CHANNEL_ID = 123456789  # 🔥 حط ايدي الشات العام
 
-SHOP = {"VIP":500, "مميز":300}
 TICKET_TYPES = ["دعم 🛠️","شراء 💰","مشاكل 🎮","اقتراح 💡"]
 
-# ───── ready ─────
+points = defaultdict(int)
+claims = defaultdict(int)
+messages = defaultdict(int)
+
+# ───── تشغيل ─────
 @bot.event
 async def on_ready():
     await tree.sync()
-    print("🔥 جاهز")
+    print("🔥 شغال")
 
-# ───── أوامر ─────
-@tree.command(name="ping")
-async def ping(i: discord.Interaction):
-    await i.response.send_message(f"🏓 {round(bot.latency*1000)}ms")
+# ───── التذاكر ─────
+class TicketButtons(View):
+    def __init__(self, owner_id):
+        super().__init__(timeout=None)
+        self.claimed_by = None
+        self.owner_id = owner_id
 
-@tree.command(name="حذف")
-async def delete(i: discord.Interaction, عدد:int):
-    await i.response.defer(ephemeral=True)
-    await i.channel.purge(limit=عدد)
-    await i.followup.send(f"🧹 تم حذف {عدد}", ephemeral=True)
+    @discord.ui.button(label="🙋‍♂️ استلام", style=discord.ButtonStyle.green)
+    async def claim(self, i: discord.Interaction, b: Button):
 
-@tree.command(name="فلوسي")
-async def money(i: discord.Interaction):
-    await i.response.send_message(f"💰 {economy[i.user.id]}")
+        if i.user.id == self.owner_id:
+            return await i.response.send_message("❌ ما تقدر تستلم تذكرتك", ephemeral=True)
 
-@tree.command(name="يومي")
-async def daily(i: discord.Interaction):
-    economy[i.user.id]+=200
-    await i.response.send_message("💸 +200")
+        if self.claimed_by:
+            return await i.response.send_message(
+                f"❌ التذكرة مستلمة من {self.claimed_by.mention}",
+                ephemeral=True
+            )
 
-@tree.command(name="تحويل")
-async def give(i: discord.Interaction, عضو:discord.Member, مبلغ:int):
-    if economy[i.user.id] < مبلغ:
-        return await i.response.send_message("❌ فلوسك قليلة")
-    economy[i.user.id]-=مبلغ
-    economy[عضو.id]+=مبلغ
-    await i.response.send_message("✅ تم")
+        self.claimed_by = i.user
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-@tree.command(name="المتجر")
-async def shop(i: discord.Interaction):
-    await i.response.send_message("\n".join([f"{k} = {v}" for k,v in SHOP.items()]))
+        # نقاط التذاكر
+        claims[i.user.id] += 1
+        if claims[i.user.id] % 2 == 0:
+            points[i.user.id] += 1
 
-@tree.command(name="شراء")
-async def buy(i: discord.Interaction, item:str):
-    if item not in SHOP:
-        return await i.response.send_message("❌ غير موجود")
-    if economy[i.user.id] < SHOP[item]:
-        return await i.response.send_message("❌ فلوسك قليلة")
-    economy[i.user.id]-=SHOP[item]
-    await i.response.send_message(f"✅ اشتريت {item}")
+        embed = discord.Embed(
+            title="📌 Ticket Claimed",
+            description=(
+                f"👤 **الإداري المسؤول:** {i.user.mention}\n"
+                f"⏰ **وقت الاستلام:** `{now}`\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                "📋 تم استلام هذه التذكرة من قبل أحد أعضاء فريق الإدارة المختصين\n"
+                "💬 سيتم التعامل مع طلبك في أقرب وقت ممكن\n\n"
+                "⚠️ يرجى الالتزام بالقوانين واحترام الإدارة"
+            ),
+            color=discord.Color.green()
+        )
 
-@tree.command(name="رقم")
-async def num(i: discord.Interaction):
-    await i.response.send_message(f"🎲 {random.randint(1,100)}")
+        embed.set_thumbnail(url=i.user.display_avatar.url)
+        embed.set_image(url=i.user.display_avatar.url)
 
-@tree.command(name="لفلي")
-async def lvl(i: discord.Interaction):
-    await i.response.send_message(f"🎖️ {levels[i.user.id]}")
+        await i.response.send_message(embed=embed)
 
-# ───── تذاكر ─────
-class Close(View):
-    @discord.ui.button(label="إغلاق 🔒", style=discord.ButtonStyle.red)
+    @discord.ui.button(label="🔒 إغلاق", style=discord.ButtonStyle.gray)
     async def close(self, i: discord.Interaction, b: Button):
         await i.response.defer()
         await i.channel.delete()
 
-class Ticket(View):
-    def __init__(self):
-        super().__init__()
-        self.add_item(SelectMenu())
-
-class SelectMenu(Select):
+# ───── إنشاء التذكرة ─────
+class TicketSelect(Select):
     def __init__(self):
         options=[discord.SelectOption(label=x) for x in TICKET_TYPES]
-        super().__init__(placeholder="اختر", options=options)
+        super().__init__(placeholder="اختر نوع التذكرة", options=options)
 
     async def callback(self, i: discord.Interaction):
         await i.response.defer(ephemeral=True)
+
         name=f"ticket-{i.user.name}"
 
         if discord.utils.get(i.guild.channels,name=name):
             return await i.followup.send("❌ عندك تذكرة",ephemeral=True)
 
-        ch=await i.guild.create_text_channel(name)
-        await ch.send(f"🎫 {i.user.mention}", view=Close())
+        overwrites={
+            i.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            i.user: discord.PermissionOverwrite(view_channel=True)
+        }
+
+        ch=await i.guild.create_text_channel(name, overwrites=overwrites)
+
+        await ch.send(
+            f"🎫 {i.user.mention}\nاستخدم الأزرار 👇",
+            view=TicketButtons(i.user.id)
+        )
+
         await i.followup.send(f"✅ {ch.mention}",ephemeral=True)
+
+class TicketView(View):
+    def __init__(self):
+        super().__init__()
+        self.add_item(TicketSelect())
 
 @tree.command(name="تذاكر")
 async def ticket(i: discord.Interaction):
-    await i.response.send_message("🎫 اختر:", view=Ticket())
+    await i.response.send_message("🎫 اختر نوع التذكرة:", view=TicketView())
 
-@tree.command(name="ذكاء")
-async def ai(i: discord.Interaction, سؤال:str):
-    await i.response.send_message(random.choice(["ايه","لا","مدري","ممكن"]))
-
-# ───── حماية + XP ─────
+# ───── التفاعل + أفضل إداري ─────
 @bot.event
 async def on_message(msg):
-    if msg.author.bot: return
+    if msg.author.bot:
+        return
 
-    user=msg.author
-    now=asyncio.get_event_loop().time()
+    # التفاعل فقط بالشات العام
+    if msg.channel.id == CHAT_CHANNEL_ID:
+        messages[msg.author.id] += 1
 
-    spam[user.id].append(now)
-    spam[user.id]=[t for t in spam[user.id] if now-t<5]
+        if messages[msg.author.id] % 100 == 0:
+            points[msg.author.id] += 3
+            await msg.channel.send(
+                f"🏆 {msg.author.mention} حصل على 3 نقاط للتفاعل!"
+            )
 
-    if len(spam[user.id])>5:
-        await msg.delete()
+    # أفضل إداري
+    if msg.content.strip() == "افضل اداري":
 
-    xp[user.id]+=5
-    if xp[user.id]>=levels[user.id]*100:
-        xp[user.id]=0
-        levels[user.id]+=1
-        await msg.channel.send(f"🎉 {user.mention} لفل {levels[user.id]}")
+        sorted_users = sorted(points.items(), key=lambda x: x[1], reverse=True)
+
+        embed = discord.Embed(
+            title="🏆 لوحة أفضل الإداريين",
+            description="📊 الترتيب يعتمد على النقاط والتفاعل",
+            color=discord.Color.gold()
+        )
+
+        medals = ["🥇","🥈","🥉","🏅","🏅"]
+
+        for i, (user_id, pts) in enumerate(sorted_users[:5]):
+            try:
+                user = await bot.fetch_user(user_id)
+
+                embed.add_field(
+                    name=f"{medals[i]} {user.name}",
+                    value=f"💎 النقاط: {pts}\n💬 التفاعل: {messages[user_id]} رسالة",
+                    inline=False
+                )
+            except:
+                continue
+
+        if sorted_users:
+            top_user = await bot.fetch_user(sorted_users[0][0])
+            embed.add_field(
+                name="👑 أفضل إداري حاليا",
+                value=f"{top_user.mention}",
+                inline=False
+            )
+            embed.set_thumbnail(url=top_user.display_avatar.url)
+
+        embed.set_footer(text="🔥 استمر بالمنافسة للوصول للقمة!")
+
+        await msg.channel.send(embed=embed)
+
+    await bot.process_commands(msg)
 
 # ───── تشغيل ─────
 keep_alive()
-bot.run(os.getenv("TOKEN"))
+bot.run(os.getenv("DISCORD_BOT_TOKEN"))
        
