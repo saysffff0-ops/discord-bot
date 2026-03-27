@@ -1,182 +1,203 @@
 import discord
-from discord.ext import commands
-from discord.ui import View, Button, Select
-import os, datetime
-from flask import Flask
-from threading import Thread
-from collections import defaultdict
+from discord.ext import commands, tasks
+from discord import app_commands
+import os, json, time
 
-# ───── keep alive ─────
-app = Flask('')
-@app.route('/')
-def home():
-    return "Alive"
-
-def keep_alive():
-    Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
-
-# ───── bot ─────
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix=None, intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-# ───── إعدادات ─────
-CHAT_CHANNEL_ID = 123456789  # 👈 حط ايدي الشات العام
-SUPPORT_ROLE = "Support"     # 👈 اسم رتبة الدعم
+# ========= إعدادات =========
+AUTO_PROMOTE = True
+AUTO_DEMOTE = True
 
-points = defaultdict(int)
-claims = defaultdict(int)
-messages = defaultdict(int)
+POINTS_PER_MESSAGE = 1
+POINTS_PER_TICKET = 1
 
-TICKET_TYPES = ["دعم 🛠️","شراء 💰","مشاكل 🎮","اقتراح 💡"]
+PROMOTE_POINTS = 500
+DEMOTE_DAYS = 7
 
-# ───── تشغيل ─────
+SUPPORT_ROLE_NAME = "Support Team"   # غيره لاسم رول الدعم عندك
+LOG_CHANNEL_NAME = "logs"           # قناة اللوق
+
+ROLE_HIERARCHY = [
+    "⚜️【Management】 TC⚜️",
+    "✦『Helper』 TC✦",
+    "⟡《Trial Staff》 TC⟡",
+    "⟦Staff⟧ TC",
+    "✦『Senior Staff』 TC✦",
+    "⚜️【Supervisor】 TC⚜️",
+    "⟡《Admin》 TC⟡",
+    "⚜️【Manager】 TC⚜️"
+]
+
+DATA_FILE = "points.json"
+ECON_FILE = "economy.json"
+
+# ========= تحميل =========
+def load(file):
+    try:
+        with open(file) as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=4)
+
+points = load(DATA_FILE)
+economy = load(ECON_FILE)
+
+def add_points(uid, amount):
+    uid = str(uid)
+    if uid not in points:
+        points[uid] = {"points": 0, "last": time.time(), "tickets": 0}
+
+    points[uid]["points"] += amount
+    points[uid]["last"] = time.time()
+    save(DATA_FILE, points)
+
+def get_points(uid):
+    return points.get(str(uid), {}).get("points", 0)
+
+# ========= تشغيل =========
 @bot.event
 async def on_ready():
-    try:
-        synced = await tree.sync()
-        print(f"✅ تم تسجيل {len(synced)} أمر")
-    except Exception as e:
-        print(e)
+    await tree.sync()
+    check_members.start()
+    print(f"🔥 Ready: {bot.user}")
 
-    print("🔥 البوت شغال")
-
-# ───── أزرار التذكرة ─────
-class TicketButtons(View):
-    def __init__(self, owner_id):
-        super().__init__(timeout=None)
-        self.claimed_by = None
-        self.owner_id = owner_id
-
-    @discord.ui.button(label="🙋‍♂️ استلام", style=discord.ButtonStyle.green)
-    async def claim(self, i: discord.Interaction, b: Button):
-
-        if not any(role.name == SUPPORT_ROLE for role in i.user.roles):
-            return await i.response.send_message("❌ هذا الزر للإدارة فقط", ephemeral=True)
-
-        if i.user.id == self.owner_id:
-            return await i.response.send_message("❌ ما تقدر تستلم تذكرتك", ephemeral=True)
-
-        if self.claimed_by:
-            return await i.response.send_message(
-                f"❌ التذكرة مستلمة من {self.claimed_by.mention}",
-                ephemeral=True
-            )
-
-        self.claimed_by = i.user
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-        claims[i.user.id] += 1
-        if claims[i.user.id] % 2 == 0:
-            points[i.user.id] += 1
-
-        embed = discord.Embed(
-            title="📌 Ticket Claimed",
-            description=(
-                f"👤 الإداري المسؤول: {i.user.mention}\n"
-                f"⏰ الوقت: `{now}`\n"
-                "━━━━━━━━━━━━━━━━━━\n"
-                "📋 تم استلام التذكرة من قبل الإدارة\n"
-                "💬 سيتم الرد قريبًا\n"
-                "⚠️ يرجى احترام الإدارة"
-            ),
-            color=discord.Color.green()
-        )
-
-        embed.set_thumbnail(url=i.user.display_avatar.url)
-        embed.set_image(url=i.user.display_avatar.url)
-
-        await i.response.send_message(embed=embed)
-
-    @discord.ui.button(label="🔒 إغلاق", style=discord.ButtonStyle.gray)
-    async def close(self, i: discord.Interaction, b: Button):
-        await i.response.defer()
-        await i.channel.delete()
-
-# ───── إنشاء التذكرة ─────
-class TicketSelect(Select):
-    def __init__(self):
-        options=[discord.SelectOption(label=x) for x in TICKET_TYPES]
-        super().__init__(placeholder="اختر نوع التذكرة", options=options)
-
-    async def callback(self, i: discord.Interaction):
-        await i.response.defer(ephemeral=True)
-
-        name=f"ticket-{i.user.name}"
-
-        if discord.utils.get(i.guild.channels,name=name):
-            return await i.followup.send("❌ عندك تذكرة",ephemeral=True)
-
-        overwrites={
-            i.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            i.user: discord.PermissionOverwrite(view_channel=True)
-        }
-
-        ch=await i.guild.create_text_channel(name, overwrites=overwrites)
-
-        await ch.send(
-            f"🎫 {i.user.mention}\nاستخدم الأزرار 👇",
-            view=TicketButtons(i.user.id)
-        )
-
-        await i.followup.send(f"✅ {ch.mention}",ephemeral=True)
-
-class TicketView(View):
-    def __init__(self):
-        super().__init__()
-        self.add_item(TicketSelect())
-
-# ───── سلاش ─────
-@tree.command(name="تذاكر")
-async def ticket(i: discord.Interaction):
-    await i.response.defer()
-    await i.followup.send("🎫 اختر نوع التذكرة:", view=TicketView())
-
-@tree.command(name="ping")
-async def ping(i: discord.Interaction):
-    await i.response.defer()
-    await i.followup.send(f"🏓 {round(bot.latency*1000)}ms")
-
-# ───── التفاعل + أفضل إداري ─────
+# ========= نقاط من الشات =========
 @bot.event
 async def on_message(msg):
     if msg.author.bot:
         return
 
-    if msg.channel.id == CHAT_CHANNEL_ID:
-        messages[msg.author.id] += 1
-
-        if messages[msg.author.id] % 100 == 0:
-            points[msg.author.id] += 3
-            await msg.channel.send(f"🏆 {msg.author.mention} حصل على 3 نقاط!")
-
-    if msg.content.strip() == "افضل اداري":
-
-        sorted_users = sorted(points.items(), key=lambda x: x[1], reverse=True)
-
-        embed = discord.Embed(
-            title="🏆 أفضل الإداريين",
-            color=discord.Color.gold()
-        )
-
-        medals = ["🥇","🥈","🥉","🏅","🏅"]
-
-        for i, (user_id, pts) in enumerate(sorted_users[:5]):
-            try:
-                user = await bot.fetch_user(user_id)
-                embed.add_field(
-                    name=f"{medals[i]} {user.name}",
-                    value=f"💎 {pts} نقطة\n💬 {messages[user_id]} رسالة",
-                    inline=False
-                )
-            except:
-                continue
-
-        await msg.channel.send(embed=embed)
+    if msg.author.guild_permissions.manage_messages:
+        add_points(msg.author.id, POINTS_PER_MESSAGE)
 
     await bot.process_commands(msg)
 
-# ───── تشغيل ─────
-keep_alive()
-bot.run(os.getenv("DISCORD_BOT_TOKEN"))CHAT_CHANNEL_ID = 123456789
-SUPPORT_ROLE = "TC 『Management』"
+# ========= Leaderboard =========
+@tree.command(name="top", description="Top admins")
+async def top(interaction: discord.Interaction):
+    data = sorted(points.items(), key=lambda x: x[1]["points"], reverse=True)[:10]
+    txt = ""
+    for i,(uid,d) in enumerate(data,1):
+        m = interaction.guild.get_member(int(uid))
+        if m:
+            txt += f"{i}. {m.mention} - {d['points']}\n"
+
+    embed = discord.Embed(title="🏆 Top Admins", description=txt, color=discord.Color.gold())
+    await interaction.response.send_message(embed=embed)
+
+# ========= تذاكر =========
+class TicketView(discord.ui.View):
+    def __init__(self, owner_id):
+        super().__init__(timeout=None)
+        self.owner_id = owner_id
+        self.claimed_by = None
+
+    @discord.ui.button(label="👨‍💼 Claim", style=discord.ButtonStyle.green)
+    async def claim(self, interaction: discord.Interaction, b):
+        if interaction.user.id == self.owner_id:
+            return await interaction.response.send_message("❌ ما تقدر تستلم تذكرتك", ephemeral=True)
+
+        if self.claimed_by:
+            return await interaction.response.send_message("❌ مستلمة", ephemeral=True)
+
+        self.claimed_by = interaction.user
+        guild = interaction.guild
+        channel = interaction.channel
+        owner = guild.owner
+
+        await channel.set_permissions(guild.default_role, read_messages=False)
+        await channel.set_permissions(interaction.user, read_messages=True)
+        await channel.set_permissions(owner, read_messages=True)
+
+        add_points(interaction.user.id, POINTS_PER_TICKET)
+
+        try:
+            await interaction.user.send(f"💰 نقاطك: {get_points(interaction.user.id)}")
+        except:
+            pass
+
+        await interaction.response.send_message(f"📌 {interaction.user.mention} استلم التذكرة")
+
+    @discord.ui.button(label="🔄 Transfer", style=discord.ButtonStyle.blurple)
+    async def transfer(self, interaction: discord.Interaction, b):
+        await interaction.response.send_message("✏️ اكتب منشن الإداري")
+
+    @discord.ui.button(label="🔒 Close", style=discord.ButtonStyle.red)
+    async def close(self, interaction: discord.Interaction, b):
+        await interaction.response.send_message("🔒 جاري الإغلاق...")
+        await interaction.channel.delete()
+
+class CreateTicket(discord.ui.View):
+    @discord.ui.button(label="Create Ticket", style=discord.ButtonStyle.green)
+    async def create(self, interaction: discord.Interaction, b):
+        g = interaction.guild
+        overwrites = {
+            g.default_role: discord.PermissionOverwrite(read_messages=False),
+            interaction.user: discord.PermissionOverwrite(read_messages=True)
+        }
+
+        ch = await g.create_text_channel(f"ticket-{interaction.user.name}", overwrites=overwrites)
+        await ch.send("🎫 تذكرتك", view=TicketView(interaction.user.id))
+        await interaction.response.send_message(f"✅ {ch.mention}", ephemeral=True)
+
+@tree.command(name="ticketsetup", description="Ticket setup")
+async def ticketsetup(interaction: discord.Interaction):
+    embed = discord.Embed(title="🎫 Tickets", description="Create ticket", color=discord.Color.green())
+    await interaction.channel.send(embed=embed, view=CreateTicket())
+    await interaction.response.send_message("✅ Done", ephemeral=True)
+
+# ========= ترقية =========
+async def promote(member):
+    if not AUTO_PROMOTE:
+        return
+    pts = get_points(member.id)
+    if pts < PROMOTE_POINTS:
+        return
+
+    for i,name in enumerate(ROLE_HIERARCHY):
+        role = discord.utils.get(member.guild.roles, name=name)
+        if role in member.roles and i+1 < len(ROLE_HIERARCHY):
+            new = discord.utils.get(member.guild.roles, name=ROLE_HIERARCHY[i+1])
+            await member.add_roles(new)
+            return
+
+# ========= نزول =========
+async def demote(member):
+    if not AUTO_DEMOTE:
+        return
+
+    uid = str(member.id)
+    if uid not in points:
+        return
+
+    last = points[uid]["last"]
+    days = (time.time()-last)/86400
+
+    if days < DEMOTE_DAYS:
+        return
+
+    for i,name in enumerate(ROLE_HIERARCHY):
+        role = discord.utils.get(member.guild.roles, name=name)
+        if role in member.roles and i-1 >= 0:
+            new = discord.utils.get(member.guild.roles, name=ROLE_HIERARCHY[i-1])
+            await member.remove_roles(role)
+            await member.add_roles(new)
+            return
+
+# ========= فحص =========
+@tasks.loop(hours=12)
+async def check_members():
+    for g in bot.guilds:
+        for m in g.members:
+            await promote(m)
+            await demote(m)
+
+# ========= تشغيل =========
+bot.run(os.getenv("TOKEN"))
