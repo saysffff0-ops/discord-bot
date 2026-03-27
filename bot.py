@@ -1,4 +1,18 @@
-import discord
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select
 import os, random, asyncio
@@ -139,4 +153,4 @@ async def on_message(msg):
         await msg.channel.send(f"🎉 {user.mention} لفل {levels[user.id]}")
 
 # تشغيل
-bot.run(os.getenv("TOKEN"))
+keep_alive()bot.run(os.getenv("TOKEN"))
